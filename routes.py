@@ -7,18 +7,48 @@ import sqlite3
 import subprocess  # For extracting audio from video
 import json
 import whisper
-from langchain.llms import Bedrock
-from langchain.vectorstores import Chroma
-from langchain.embeddings import BedrockEmbeddings
+from langchain_community.llms import Bedrock
+from langchain_chroma import Chroma
+from langchain_aws import BedrockEmbeddings, BedrockLLM  # <-- Use this for embeddings
+from dotenv import load_dotenv
+from ffmpeg_setup import FFMPEG_PATH
+# from aws_config import get_aws_session
 
+# # Get AWS session
+# aws_session = get_aws_session()
 # Initialize Whisper model
+load_dotenv()
 whisper_model = whisper.load_model("base")
 
 # LangChain Bedrock and Chroma setup
-embedding = BedrockEmbeddings(model_id="amazon.titan-embed-text-v1", region_name="us-east-1")
+embedding = BedrockEmbeddings(
+    model_id="amazon.titan-embed-text-v2:0",
+    region_name="us-east-1"
+)
 vectorstore = Chroma(collection_name="meeting_insights", embedding_function=embedding)
 
 router = APIRouter()
+
+@router.get("/users/")
+async def list_users():
+    """
+    List all users (emails) who have recorded meetings
+    """
+    conn = sqlite3.connect("meetings.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Get all unique emails that have meetings
+    cursor.execute(
+        """SELECT DISTINCT user_email 
+           FROM meetings
+           ORDER BY user_email"""
+    )
+    
+    users = [row["user_email"] for row in cursor.fetchall()]
+    conn.close()
+    
+    return {"users": users}
 
 @router.post("/upload-meeting/")
 async def upload_meeting(
@@ -30,7 +60,26 @@ async def upload_meeting(
     """
     Upload a meeting recording (audio or video) with user identifier.
     For video files, the audio will be extracted before processing.
+    Automatically registers new users if email not found.
     """
+    # First check/register the user in one step
+    conn = sqlite3.connect("meetings.db")
+    cursor = conn.cursor()
+    
+    # Check if user exists
+    cursor.execute("SELECT email FROM users WHERE email = ?", (email,))
+    user = cursor.fetchone()
+    
+    if not user:
+        # Register new user automatically
+        cursor.execute(
+            "INSERT INTO users (email, created_at) VALUES (?, ?)",
+            (email, datetime.now().isoformat())
+        )
+        conn.commit()
+    
+    conn.close()
+    
     # Generate a unique meeting ID
     meeting_id = str(uuid.uuid4())
     
@@ -53,8 +102,8 @@ async def upload_meeting(
         try:
             # Use ffmpeg to extract audio
             subprocess.run([
-                'ffmpeg', '-i', file_path, '-q:a', '0', '-map', 'a', audio_path
-            ], check=True)
+                    FFMPEG_PATH, '-i', file_path, '-q:a', '0', '-map', 'a', audio_path
+                ], check=True)
         except subprocess.CalledProcessError as e:
             raise HTTPException(status_code=500, detail=f"Failed to extract audio: {str(e)}")
     
@@ -86,7 +135,6 @@ async def upload_meeting(
         "status": "processing",
         "message": "Meeting upload successful. Processing has started."
     }
-
 
 async def process_meeting_audio(meeting_id: str, audio_path: str, user_email: str):
     """
@@ -169,7 +217,8 @@ async def process_meeting_audio(meeting_id: str, audio_path: str, user_email: st
             )
         
         # Step 4: Prepare data for search functionality
-        store_in_vector_db(meeting_id, transcription, segments, summary, key_topics)
+        # Updated to pass user_email to the vector store function
+        store_in_vector_db(meeting_id, transcription, segments, summary, key_topics, user_email)
         
         conn.commit()
         
@@ -219,14 +268,15 @@ def analyze_transcript(transcription: str):
     }}
     """
     
-    model_id = "anthropic.claude-v2"  # Use an appropriate model from Amazon Bedrock
+    model_id = "amazon.titan-text-premier-v1:0"
+    # Use an Amazon Bedrock model
     
     try:
-        llm = Bedrock(
+        llm = BedrockLLM(
             model_id=model_id,
             region_name="us-east-1"
         )
-        result_text = llm(prompt)
+        result_text = llm.invoke(prompt)
         
         result_json = extract_json_from_text(result_text)
         
@@ -270,38 +320,79 @@ def extract_json_from_text(text):
     print("Failed to extract JSON from LLM response")
     return {}
 
-def store_in_vector_db(meeting_id, transcription, segments, summary, key_topics):
+def store_in_vector_db(meeting_id, transcription, segments, summary, key_topics, user_email):
     """
     Store meeting information in vector database for semantic search using LangChain's Chroma
+    Include user_email in metadata for better filtering
     """
     try:
-        metadata = {
-            "meeting_id": meeting_id,
-            "type": "full_transcript",
-            "summary": summary,
-            "topics": ", ".join(key_topics)
-        }
-        vectorstore.add_texts(
-            texts=[transcription],
-            metadatas=[metadata]
-        )
+        # For better chunking, split the transcription into paragraph-sized chunks
+        # so we can retrieve more relevant context around matches
+        chunk_size = 500  # characters per chunk
+        overlap = 100     # overlap between chunks
         
-        if segments:
-            segment_texts = [segment.get("text", "") for segment in segments]
-            segment_metadatas = []
-            for i, segment in enumerate(segments):
+        if transcription:
+            transcription_chunks = []
+            for i in range(0, len(transcription), chunk_size - overlap):
+                chunk = transcription[i:i + chunk_size]
+                transcription_chunks.append(chunk)
+            
+            # Store each chunk of the transcript
+            for i, chunk in enumerate(transcription_chunks):
                 metadata = {
                     "meeting_id": meeting_id,
-                    "type": "segment",
-                    "start_time": segment.get("start", 0),
-                    "end_time": segment.get("end", 0),
-                    "segment_index": i
+                    "type": "transcript_chunk",
+                    "chunk_index": i,
+                    "total_chunks": len(transcription_chunks),
+                    "user_email": user_email
                 }
-                segment_metadatas.append(metadata)
+                vectorstore.add_texts(
+                    texts=[chunk],
+                    metadatas=[metadata]
+                )
+        
+        # Store summary separately
+        if summary:
+            summary_metadata = {
+                "meeting_id": meeting_id,
+                "type": "summary",
+                "user_email": user_email
+            }
             vectorstore.add_texts(
-                texts=segment_texts,
-                metadatas=segment_metadatas
+                texts=[summary],
+                metadatas=[summary_metadata]
             )
+        
+        # Store topics for better retrieval
+        if key_topics:
+            topics_text = "Key topics discussed: " + ", ".join(key_topics)
+            topics_metadata = {
+                "meeting_id": meeting_id,
+                "type": "key_topics",
+                "user_email": user_email
+            }
+            vectorstore.add_texts(
+                texts=[topics_text],
+                metadatas=[topics_metadata]
+            )
+        
+        # Store segments if available
+        if segments:
+            for i, segment in enumerate(segments):
+                segment_text = segment.get("text", "")
+                if segment_text:
+                    metadata = {
+                        "meeting_id": meeting_id,
+                        "type": "segment",
+                        "start_time": segment.get("start", 0),
+                        "end_time": segment.get("end", 0),
+                        "segment_index": i,
+                        "user_email": user_email
+                    }
+                    vectorstore.add_texts(
+                        texts=[segment_text],
+                        metadatas=[metadata]
+                    )
         
         print(f"Successfully stored meeting {meeting_id} in vector database")
     except Exception as e:
@@ -334,26 +425,36 @@ async def verify_email(email: str = Form(...)):
 
 
 @router.get("/meetings/")
-async def list_meetings(email: str):
+async def list_meetings(email: Optional[str] = None):
     """
-    List all meetings for a specific user by email
+    List all meetings for a specific user by email.
+    If no email is provided, returns all meetings.
     """
     conn = sqlite3.connect("meetings.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    cursor.execute(
-        """SELECT id, title, status, created_at, completed_at 
-           FROM meetings 
-           WHERE user_email = ? 
-           ORDER BY created_at DESC""",
-        (email,)
-    )
+    if email:
+        # Filter meetings by email
+        cursor.execute(
+            """SELECT id, title, user_email, status, created_at, completed_at 
+               FROM meetings 
+               WHERE user_email = ? 
+               ORDER BY created_at DESC""",
+            (email,)
+        )
+    else:
+        # Return all meetings if no email specified
+        cursor.execute(
+            """SELECT id, title, user_email, status, created_at, completed_at 
+               FROM meetings 
+               ORDER BY created_at DESC"""
+        )
     
     meetings = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    return {"email": email, "meetings": meetings}
+    return {"email": email, "meetings": meetings, "count": len(meetings)}
 
 
 @router.get("/meetings/{meeting_id}")
@@ -412,67 +513,129 @@ async def get_meeting_details(meeting_id: str):
     
     return meeting
 
-@router.get("/search/")
-async def search_meetings(query: str, email: Optional[str] = None, limit: int = 5):
+@router.get("/ask/")
+async def ask_question(question: str, meeting_id: str):
     """
-    Search through meeting content using LangChain vector similarity search
+    Ask a question about a specific meeting and get an AI-generated answer.
+    Uses RAG (Retrieval Augmented Generation) to provide relevant answers.
     """
     try:
-        # Use LangChain's similarity search with metadata filter if email is provided
-        filter_dict = {"user_email": email} if email else None
+        # Check if meeting exists first
+        conn = sqlite3.connect("meetings.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         
+        cursor.execute("SELECT title, summary, key_topics FROM meetings WHERE id = ?", (meeting_id,))
+        meeting_data = cursor.fetchone()
+        
+        if not meeting_data:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        meeting_info = dict(meeting_data)
+        
+        # Parse key topics if available
+        if meeting_info.get("key_topics"):
+            try:
+                meeting_info["key_topics"] = json.loads(meeting_info["key_topics"])
+            except:
+                meeting_info["key_topics"] = []
+        
+        # Get additional meeting data based on question
+        cursor.execute("SELECT description FROM decisions WHERE meeting_id = ?", (meeting_id,))
+        decisions = [row["description"] for row in cursor.fetchall()]
+        
+        cursor.execute("SELECT description, assignee FROM action_items WHERE meeting_id = ?", (meeting_id,))
+        action_items = [f"{row['description']} (Assigned to: {row['assignee']})" for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        # Get relevant content from vector search
+        filter_dict = {"meeting_id": meeting_id}
+        
+        # Get more context (10 chunks) to ensure we have enough information
         search_results = vectorstore.similarity_search(
-            query=query,
-            k=limit,
+            query=question,
+            k=10,
             filter=filter_dict
         )
         
-        # Process and format results
-        formatted_results = []
-        for doc in search_results:
-            # Extract metadata from the document
-            metadata = doc.metadata
-            meeting_id = metadata.get("meeting_id")
-            
-            # Get additional meeting info from database for enriching results
-            conn = sqlite3.connect("meetings.db")
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute(
-                """SELECT id, title, user_email, created_at, summary
-                   FROM meetings 
-                   WHERE id = ?""",
-                (meeting_id,)
-            )
-                
-            meeting_row = cursor.fetchone()
-            conn.close()
-            
-            if not meeting_row:
-                continue  # Skip if meeting not found
-                
-            meeting_info = dict(meeting_row)
-            
-            # Format the result with rich context
-            result = {
-                "meeting_id": meeting_id,
-                "meeting_title": meeting_info.get("title"),
-                "meeting_date": meeting_info.get("created_at"),
-                "meeting_summary": meeting_info.get("summary"),
-                "segment_type": metadata.get("type", "unknown"),
-                "content": doc.page_content,
-                "context": {
-                    "start_time": metadata.get("start_time"),
-                    "end_time": metadata.get("end_time"),
-                    "topics": metadata.get("topics", "")
-                },
-                "score": getattr(doc, "score", None)  
-            }
-            
-            formatted_results.append(result)
+        # Format the context
+        contexts = []
         
-        return {"query": query, "results": formatted_results}
+        # First add the meeting metadata
+        contexts.append(f"Meeting title: {meeting_info['title']}")
+        contexts.append(f"Meeting summary: {meeting_info.get('summary', '')}")
+        
+        # Add key topics if available
+        if meeting_info.get("key_topics"):
+            contexts.append(f"Key topics: {', '.join(meeting_info['key_topics'])}")
+        
+        # Add decisions if available
+        if decisions:
+            contexts.append("Key decisions:")
+            for decision in decisions:
+                contexts.append(f"- {decision}")
+        
+        # Add action items if available
+        if action_items:
+            contexts.append("Action items:")
+            for item in action_items:
+                contexts.append(f"- {item}")
+        
+        # Add content from vector search
+        for doc in search_results:
+            if doc.metadata.get("type") == "transcript_chunk":
+                contexts.append(f"Transcript content: {doc.page_content}")
+            elif doc.metadata.get("type") == "segment":
+                contexts.append(f"Transcript segment (Time {doc.metadata.get('start_time')} to {doc.metadata.get('end_time')}): {doc.page_content}")
+            else:
+                contexts.append(f"{doc.metadata.get('type', 'Content')}: {doc.page_content}")
+        
+        # Create the prompt
+        context_text = "\n\n".join(contexts)
+        
+        prompt = f"""
+            You are an experienced AI research assistant analyzing meeting transcripts. Your task is to provide highly detailed, factual, and comprehensive answers to questions about meeting "{meeting_info['title']}".
+
+            USER QUESTION: "{question}"
+
+            INSTRUCTIONS:
+            1. Answer ONLY based on the CONTEXT provided below.
+            2. Include ALL relevant details from the context that address the question.
+            3. Structure your answer with clear paragraphs and bullet points when appropriate.
+            4. If answering about meeting summary, include ALL key points, topics, decisions, and action items mentioned.
+            5. For questions about specific topics, provide extensive details including who discussed them and what was concluded.
+            6. If discussing action items, include ALL details about assignees, deadlines, and specific responsibilities.
+            7. When mentioning decisions, explain the full context of how they were reached.
+            8. For questions about participants, detail everyone's contributions and roles.
+            9. If the EXACT information requested is NOT in the context, state clearly: "Based on the meeting information provided, I cannot find specific details about [topic]. The available context covers [what IS available]."
+            10. Maintain a professional, analytical tone throughout your response.
+            11. DO NOT invent, assume, or infer information not explicitly stated in the context.
+            12. DO NOT reference sources or information outside the provided context.
+            13. PRIORITIZE accuracy over brevity - your answer should be comprehensive.
+
+            CONTEXT:
+            {context_text}
+
+            Begin your answer now, ensuring it is thorough, well-structured, and directly addresses the question using only information from the context provided.
+            """
+        
+        # Generate answer
+        llm = BedrockLLM(
+            model_id="amazon.titan-text-premier-v1:0",
+            region_name="us-east-1"
+        )
+        
+        answer = llm.invoke(prompt)
+        
+        # Return the answer
+        return {
+            "question": question,
+            "answer": answer,
+            "meeting_id": meeting_id,
+            "meeting_title": meeting_info["title"]
+        }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error answering question: {str(e)}")

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Intelligence Platform</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8 max-w-5xl">
+        <header class="mb-10 text-center">
+            <h1 class="text-4xl font-bold text-indigo-700">Meeting Intelligence Platform</h1>
+            <p class="text-gray-600 mt-2">Extract actionable insights from your meeting recordings</p>
+        </header>
+
+        <div class="bg-white shadow-lg rounded-lg overflow-hidden">
+            <!-- Upload Meeting Section -->
+            <div class="p-6 border-b border-gray-200 bg-gray-50">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upload New Meeting Recording</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Your Email Address</label>
+                        <input type="email" id="email" class="w-full p-3 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter your email">
+                    </div>
+                    <div>
+                        <label for="audioFile" class="block text-sm font-medium text-gray-700 mb-1">Audio/Video File</label>
+                        <input type="file" id="audioFile" accept="audio/*,video/*" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label for="meetingTitle" class="block text-sm font-medium text-gray-700 mb-1">Meeting Title (optional)</label>
+                        <input type="text" id="meetingTitle" class="w-full p-3 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter a descriptive title for this meeting">
+                    </div>
+                    <button onclick="uploadMeeting()" class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors duration-200">
+                        Upload Meeting
+                    </button>
+                </div>
+                <div id="upload-status" class="mt-2 text-sm"></div>
+            </div>
+
+            <!-- Browse Meetings Section -->
+            <div class="p-6 border-b border-gray-200">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Browse Meetings</h2>
+                
+                <!-- User Selection -->
+                <div class="mb-4">
+                    <label for="userSelect" class="block text-sm font-medium text-gray-700 mb-1">1. Select User/Email</label>
+                    <div class="flex gap-2">
+                        <select id="userSelect" class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="">-- Select User --</option>
+                        </select>
+                        <button onclick="loadUsers()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200">
+                            Load Users
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Meetings List -->
+                <div class="mb-4">
+                    <label for="meetingSelect" class="block text-sm font-medium text-gray-700 mb-1">2. Select Meeting</label>
+                    <div class="flex gap-2">
+                        <select id="meetingSelect" class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="">-- Select a Meeting --</option>
+                        </select>
+                        <button onclick="loadMeetingsForSelectedUser()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200">
+                            Load Meetings
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="text-center">
+                    <button onclick="loadMeetingDetails()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-8 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors duration-200">
+                        3. View Meeting Details
+                    </button>
+                </div>
+            </div>
+
+            <!-- Meeting Details & Q&A Section -->
+            <div class="p-6 border-b border-gray-200 bg-blue-50">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Meeting Q&A</h2>
+                <p class="text-gray-600 mb-4">Ask questions about the selected meeting to get AI-generated answers</p>
+                
+                <div class="bg-white p-4 rounded-md border border-gray-300 mb-4">
+                    <p class="text-sm text-gray-600 mb-1">Selected Meeting:</p>
+                    <p id="selectedMeetingDisplay" class="font-semibold">No meeting selected</p>
+                </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label for="questionInput" class="block text-sm font-medium text-gray-700 mb-1">Ask a Question</label>
+                        <input type="text" id="questionInput" class="w-full p-3 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" 
+                               placeholder="e.g., What were the key topics? What decisions were made? Who has action items?">
+                    </div>
+                    <button onclick="askAboutSelectedMeeting()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors duration-200">
+                        Ask About This Meeting
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Display -->
+            <div class="p-6">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Results</h2>
+                <div id="result" class="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-auto h-96 whitespace-pre-wrap text-gray-700">
+                    Results will appear here...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+        let currentEmail = '';
+        let currentMeetingId = '';
+        let currentMeetingTitle = '';
+        
+        // Helper to display results
+        function displayResult(data, formatAsHTML = false) {
+            const resultDiv = document.getElementById('result');
+            if (formatAsHTML) {
+                resultDiv.innerHTML = data;
+            } else if (typeof data === 'string') {
+                resultDiv.textContent = data;
+            } else {
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            }
+        }
+        
+        // Update status with colored message
+        function updateStatus(elementId, message, isSuccess) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `mt-2 text-sm ${isSuccess ? 'text-green-600' : 'text-red-600'}`;
+        }
+        
+        // Update the selected meeting display
+        function updateSelectedMeeting(title = null) {
+            const display = document.getElementById('selectedMeetingDisplay');
+            if (title) {
+                display.textContent = title;
+                display.className = 'font-semibold text-indigo-700';
+                currentMeetingTitle = title;
+            } else {
+                display.textContent = 'No meeting selected';
+                display.className = 'font-semibold';
+                currentMeetingTitle = '';
+            }
+        }
+
+        // Load all users who have meetings
+        async function loadUsers() {
+            try {
+                displayResult('Loading users...');
+                
+                const response = await fetch(`${API_BASE}/users/`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const userSelect = document.getElementById('userSelect');
+                    // Clear existing options except the first one
+                    while (userSelect.options.length > 1) {
+                        userSelect.remove(1);
+                    }
+                    
+                    // Add users to dropdown
+                    data.users.forEach(email => {
+                        const option = document.createElement('option');
+                        option.value = email;
+                        option.textContent = email;
+                        userSelect.appendChild(option);
+                    });
+                    
+                    // Reset meeting selection when users are loaded
+                    const meetingSelect = document.getElementById('meetingSelect');
+                    while (meetingSelect.options.length > 1) {
+                        meetingSelect.remove(1);
+                    }
+                    updateSelectedMeeting(null);
+                    
+                    displayResult(`Loaded ${data.users.length} users. Select a user to see their meetings.`);
+                } else {
+                    displayResult(`Error: ${data.detail || 'Failed to load users'}`);
+                }
+            } catch (error) {
+                displayResult(`Error: ${error.message}`);
+            }
+        }
+        
+        // Load meetings for selected user
+        async function loadMeetingsForSelectedUser() {
+            const userSelect = document.getElementById('userSelect');
+            const selectedEmail = userSelect.value;
+            
+            if (!selectedEmail) {
+                displayResult('Please select a user first');
+                return;
+            }
+            
+            try {
+                displayResult(`Loading meetings for ${selectedEmail}...`);
+                
+                const url = `${API_BASE}/meetings/?email=${encodeURIComponent(selectedEmail)}`;
+                currentEmail = selectedEmail;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const meetingSelect = document.getElementById('meetingSelect');
+                    // Clear existing options except the first one
+                    while (meetingSelect.options.length > 1) {
+                        meetingSelect.remove(1);
+                    }
+                    
+                    // Add meetings to dropdown
+                    data.meetings.forEach(meeting => {
+                        const option = document.createElement('option');
+                        option.value = meeting.id;
+                        option.textContent = `${meeting.title} (${new Date(meeting.created_at).toLocaleDateString()})`;
+                        meetingSelect.appendChild(option);
+                    });
+                    
+                    // Reset current meeting when meetings are loaded
+                    currentMeetingId = '';
+                    updateSelectedMeeting(null);
+                    
+                    if (data.meetings.length === 0) {
+                        displayResult(`No meetings found for ${selectedEmail}. Upload a meeting recording to get started.`);
+                    } else {
+                        displayResult(`Found ${data.meetings.length} meetings for ${selectedEmail}. Select a meeting to view details.`);
+                    }
+                } else {
+                    displayResult(`Error: ${data.detail || 'Failed to load meetings'}`);
+                }
+            } catch (error) {
+                displayResult(`Error: ${error.message}`);
+            }
+        }
+        
+        // Load details for a selected meeting
+        async function loadMeetingDetails() {
+            const meetingSelect = document.getElementById('meetingSelect');
+            const meetingId = meetingSelect.value;
+            
+            if (!meetingId) {
+                displayResult('Please select a meeting first');
+                return;
+            }
+            
+            try {
+                displayResult(`Loading meeting details for ID: ${meetingId}...`);
+                
+                const response = await fetch(`${API_BASE}/meetings/${meetingId}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Save current meeting ID
+                    currentMeetingId = meetingId;
+                    updateSelectedMeeting(data.title);
+                    
+                    // Format the meeting details in a more readable way
+                    let formattedOutput = `
+                        <div class="space-y-6">
+                            <div>
+                                <h3 class="text-xl font-bold text-indigo-700">${data.title}</h3>
+                                <p class="text-sm text-gray-600">By: ${data.user_email} on ${new Date(data.created_at).toLocaleString()}</p>
+                                <p class="text-sm font-medium ${data.status === 'completed' ? 'text-green-600' : 'text-yellow-600'}">
+                                    Status: ${data.status}
+                                </p>
+                            </div>
+                            
+                            ${data.summary ? `
+                                <div>
+                                    <h4 class="font-bold text-gray-800">Summary:</h4>
+                                    <p class="mt-1">${data.summary}</p>
+                                </div>
+                            ` : ''}
+                            
+                            ${data.key_topics && data.key_topics.length > 0 ? `
+                                <div>
+                                    <h4 class="font-bold text-gray-800">Key Topics:</h4>
+                                    <ul class="list-disc pl-5 mt-1">
+                                        ${data.key_topics.map(topic => `<li>${topic}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+                            
+                            ${data.action_items && data.action_items.length > 0 ? `
+                                <div>
+                                    <h4 class="font-bold text-gray-800">Action Items:</h4>
+                                    <ul class="list-disc pl-5 mt-1">
+                                        ${data.action_items.map(item => `
+                                            <li>
+                                                ${item.description}
+                                                ${item.assignee !== 'Unassigned' ? `<span class="text-sm font-medium text-indigo-600"> (${item.assignee})</span>` : ''}
+                                                ${item.due_date ? `<span class="text-sm text-gray-600"> - Due: ${item.due_date}</span>` : ''}
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+                            
+                            ${data.decisions && data.decisions.length > 0 ? `
+                                <div>
+                                    <h4 class="font-bold text-gray-800">Decisions:</h4>
+                                    <ul class="list-disc pl-5 mt-1">
+                                        ${data.decisions.map(decision => `<li>${decision.description}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="bg-blue-100 p-4 rounded-md mt-4">
+                                <p class="text-blue-800 font-medium">Ask AI about this meeting:</p>
+                                <p class="text-sm text-blue-700">Use the Q&A section below to ask questions about this meeting</p>
+                            </div>
+                            
+                            ${data.transcription ? `
+                                <div>
+                                    <h4 class="font-bold text-gray-800 flex items-center">
+                                        <span>Transcription</span>
+                                        <button onclick="toggleTranscription()" class="ml-2 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-400 rounded px-2 py-1">
+                                            Show/Hide
+                                        </button>
+                                    </h4>
+                                    <div id="transcription" class="mt-1 p-3 bg-gray-100 rounded-md max-h-40 overflow-y-auto hidden">
+                                        ${data.transcription}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    
+                    displayResult(formattedOutput, true);
+                } else {
+                    displayResult(`Error: ${data.detail || 'Failed to load meeting details'}`);
+                }
+            } catch (error) {
+                displayResult(`Error: ${error.message}`);
+            }
+        }
+        
+        // Toggle transcription visibility
+        function toggleTranscription() {
+            const transcription = document.getElementById('transcription');
+            if (transcription) {
+                transcription.classList.toggle('hidden');
+            }
+        }
+        
+        // Upload meeting recording
+        async function uploadMeeting() {
+            const email = document.getElementById('email').value;
+            const fileInput = document.getElementById('audioFile');
+            const title = document.getElementById('meetingTitle').value;
+            
+            if (!email) {
+                updateStatus('upload-status', 'Please enter your email address', false);
+                return;
+            }
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                updateStatus('upload-status', 'Please select a file to upload', false);
+                return;
+            }
+
+            updateStatus('upload-status', 'Uploading... please wait', true);
+
+            try {
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                formData.append('email', email);
+                if (title) {
+                    formData.append('meeting_title', title);
+                }
+                
+                const response = await fetch(`${API_BASE}/upload-meeting/`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateStatus('upload-status', `${data.message} ID: ${data.meeting_id}`, true);
+                    displayResult(data);
+                    
+                    // Update email in the user dropdown
+                    const userSelect = document.getElementById('userSelect');
+                    let found = false;
+                    for (let i = 0; i < userSelect.options.length; i++) {
+                        if (userSelect.options[i].value === email) {
+                            userSelect.selectedIndex = i;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        const option = document.createElement('option');
+                        option.value = email;
+                        option.textContent = email;
+                        userSelect.appendChild(option);
+                        userSelect.value = email;
+                    }
+                    
+                    // Reload meetings for this user
+                    currentEmail = email;
+                    setTimeout(() => {
+                        loadMeetingsForSelectedUser();
+                    }, 1000);
+                } else {
+                    updateStatus('upload-status', `Error: ${data.detail || 'Upload failed'}`, false);
+                    displayResult(data);
+                }
+            } catch (error) {
+                updateStatus('upload-status', `Error: ${error.message}`, false);
+                displayResult(`Error: ${error.message}`);
+            }
+        }
+
+        // Ask AI about the selected meeting
+        async function askAboutSelectedMeeting() {
+            const question = document.getElementById('questionInput').value;
+            
+            if (!question) {
+                displayResult('Please enter a question');
+                return;
+            }
+            
+            if (!currentMeetingId) {
+                displayResult('Please select a meeting first');
+                return;
+            }
+
+            displayResult(`Thinking about "${currentMeetingTitle}"...`);
+
+            try {
+                const params = new URLSearchParams({
+                    question: question,
+                    meeting_id: currentMeetingId
+                });
+
+                const response = await fetch(`${API_BASE}/ask/?${params.toString()}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Format the answer in a readable way
+                    let formattedOutput = `
+                        <div class="space-y-4">
+                            <div class="bg-green-50 p-2 text-sm rounded-t-md border-b border-green-200">
+                                <span class="font-medium">Meeting:</span> ${data.meeting_title}
+                            </div>
+                            <div class="p-4 bg-blue-50 border border-blue-200 rounded-md">
+                                <p class="font-medium text-indigo-700 mb-2">Q: ${data.question}</p>
+                                <div class="mt-3 bg-white p-3 rounded border border-blue-100">
+                                    <p class="whitespace-pre-line">${data.answer}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    displayResult(formattedOutput, true);
+                    
+                    // Update question input field with placeholder for follow-up
+                    document.getElementById('questionInput').value = '';
+                    document.getElementById('questionInput').placeholder = "Ask another question...";
+                    
+                } else {
+                    displayResult(`Error: ${data.detail || 'Question answering failed'}`);
+                }
+            } catch (error) {
+                displayResult(`Error: ${error.message}`);
+            }
+        }
+        
+        // Helper function to load meeting details from meeting ID
+        function loadMeetingForResult(meetingId) {
+            // Find the meeting in the select and set it
+            const meetingSelect = document.getElementById('meetingSelect');
+            let found = false;
+            for (let i = 0; i < meetingSelect.options.length; i++) {
+                if (meetingSelect.options[i].value === meetingId) {
+                    meetingSelect.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (found) {
+                loadMeetingDetails();
+            } else {
+                // If the meeting isn't in the current list, fetch it directly
+                displayResult(`Loading meeting details for ID: ${meetingId}...`);
+                fetch(`${API_BASE}/meetings/${meetingId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Add the meeting to the dropdown
+                        const option = document.createElement('option');
+                        option.value = data.id;
+                        option.textContent = `${data.title} (${new Date(data.created_at).toLocaleDateString()})`;
+                        meetingSelect.appendChild(option);
+                        meetingSelect.value = data.id;
+                        
+                        // Display meeting details
+                        loadMeetingDetails();
+                    })
+                    .catch(error => {
+                        displayResult(`Error: ${error.message}`);
+                    });
+            }
+        }
+        
+        // Load users when page loads
+        window.addEventListener('DOMContentLoaded', function() {
+            // Check if we should load users on page load
+            setTimeout(loadUsers, 500);
+        });
+    </script>
+</body>
+</html>

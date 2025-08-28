@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routes import router
+from db import init_db
 
 app = FastAPI(title="Meeting Intelligence Platform API")
 
@@ -12,7 +14,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include our routes
+app.include_router(router, prefix="/api")
 
+@app.on_event("startup")
+async def startup_event():
+    init_db()
 
 @app.get("/")
 async def root():

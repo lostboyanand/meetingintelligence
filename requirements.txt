@@ -1,0 +1,9 @@
+fastapi
+openai-whisper
+langchain
+uvicorn
+ffmpeg-binaries
+langchain-aws
+python-dotenv
+langchain-chroma
+python-multipart
